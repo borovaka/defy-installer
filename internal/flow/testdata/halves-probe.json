@@ -1,0 +1,84 @@
+{
+ "comment": "Ports: Studio /dev/studio, which never answers HELLO, and the updater /dev/updater. Images from firmwaretest: HalfPackage(app, 17, side), where app is a stack of 0x20042000, a reset vector of 0x10006109, then 992 bytes of 0xa5. The session nonce comes from the fake's secrets.randbits, fixed at 0xabcdef01. Find the updater and probe both halves. Added by hand, because the Python installer never sent PAIRING: on /dev/updater, after HELLO's reply, the PAIRING request 4455010c0000000000000000000000001cf35fac and the reply that Neuron firmware older than PAIRING gives, 4455018c0000000000000000000080ffcda1b41a: the request's header with bit 0x80 set in the opcode, no payload and status -128, ENOTCONN, then the CRC-32 of the header. Everything else is as recorded.",
+ "argv": [
+  "halves-probe",
+  "--serial",
+  "0123456789ABCDEF"
+ ],
+ "status": 0,
+ "opens": [
+  {
+   "path": "/dev/studio",
+   "events": [
+    {
+     "reset_input": true
+    },
+    {
+     "dtr": true
+    },
+    {
+     "host_hex": "44550101000000000000000000000000629373eb44550101000000000000000000000000629373eb"
+    },
+    {
+     "dtr": false
+    },
+    {
+     "close": true
+    }
+   ]
+  },
+  {
+   "path": "/dev/updater",
+   "events": [
+    {
+     "reset_input": true
+    },
+    {
+     "dtr": true
+    },
+    {
+     "host_hex": "44550101000000000000000000000000629373eb"
+    },
+    {
+     "device_hex": "445501810000000000000000180000004445465955504431000104010050000000001c001027000072b3796d"
+    },
+    {
+     "host_hex": "4455010c0000000000000000000000001cf35fac"
+    },
+    {
+     "device_hex": "4455018c0000000000000000000080ffcda1b41a"
+    },
+    {
+     "host_hex": "4455010201efcdab01000000000000001c7dcb5e"
+    },
+    {
+     "device_hex": "4455018201efcdab01000000000000000b58a1fe"
+    },
+    {
+     "host_hex": "4455010301efcdab020000000100000000bc8cbf5f"
+    },
+    {
+     "device_hex": "4455018301efcdab020000001400000000000000010000000050000000000000000000000ce5b81d"
+    },
+    {
+     "host_hex": "4455010301efcdab03000000010000000169a8c33f"
+    },
+    {
+     "device_hex": "4455018301efcdab0300000014000000010000000100000000500000000000000000000057236a79"
+    },
+    {
+     "host_hex": "4455010701efcdab04000000000000006bc0040b"
+    },
+    {
+     "device_hex": "4455018701efcdab04000000000000007ce56eab"
+    },
+    {
+     "dtr": false
+    },
+    {
+     "close": true
+    }
+   ]
+  }
+ ]
+}

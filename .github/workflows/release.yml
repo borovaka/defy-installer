@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: MIT
+#
+# A v* tag builds the installer for every OS from scratch, without caches,
+# and drafts a release with the archives, THIRD_PARTY_LICENSES, the install
+# scripts and SHA256SUMS, which is published by hand. The README's
+# "Building" section lists the steps and the archives.
+#
+# Run by hand from the Actions tab, on a branch, it is a dry run: it builds,
+# checks and packs the archives as a tag does and uploads them as the run's
+# artifact, with no version check, attestation or release.
+#
+# On a public repository a tag also records a build provenance attestation
+# for each archive, which `gh attestation verify` checks. That job has the
+# id-token permission an attestation needs, so the job that runs the tests
+# and the build only reads the repository. GitHub offers attestations to
+# private repositories only on Enterprise Cloud, so a private repository
+# skips that job.
+#
+# Actions are pinned to commits, with the release in a comment;
+# .github/dependabot.yml keeps them current.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time for each tag; a run in progress is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Release archives
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test ./...
+      # The binaries go to build/, and only what the release attaches goes
+      # to dist/. .gitignore lists both, since Go stamps a binary built with
+      # an untracked file in the checkout as +dirty.
+      - name: Build
+        run: |
+          mkdir -p dist
+          packaging/build.sh build
+      # The binaries contain Go's runtime and standard library, and the
+      # modules that each binary lists as linked into it. Each module's
+      # licence goes into THIRD_PARTY_LICENSES, followed by its NOTICE file
+      # if it has one, as the Apache licence asks; a module without a
+      # licence file stops the release.
+      - name: Licences
+        run: |
+          set -o pipefail
+          modules="$(go version -m build/defy-installer-* | awk '$1 == "dep" { print $2, $3 }' | sort -u)"
+          rule="$(printf '%072d' 0 | tr 0 -)"
+          {
+            echo "The defy-installer binaries contain the Go runtime and standard library,"
+            echo "and the Go modules below. Each one's licence follows its name."
+            printf '\n%s\n%s: the Go runtime and standard library\n%s\n\n' "$rule" "$(go env GOVERSION)" "$rule"
+            cat "$(go env GOROOT)/LICENSE"
+            while read -r path version; do
+              dir="$(go list -m -f '{{.Dir}}' "$path@$version")"
+              licence=
+              for name in LICENSE LICENSE.md LICENSE.txt LICENCE COPYING; do
+                if [ -f "$dir/$name" ]; then
+                  licence="$dir/$name"
+                  break
+                fi
+              done
+              if [ -z "$licence" ]; then
+                echo "$path $version has no licence file in $dir" >&2
+                exit 1
+              fi
+              printf '\n%s\n%s %s\n%s\n\n' "$rule" "$path" "$version" "$rule"
+              cat "$licence"
+              if [ -f "$dir/NOTICE" ]; then
+                printf '\n'
+                cat "$dir/NOTICE"
+              fi
+              # A licence that names Apache 2.0 without its terms, as
+              # go.yaml.in/yaml's does, gets the full text once, below.
+              if grep -q 'Apache License' "$licence" &&
+                ! grep -q 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION' "$licence"; then
+                apache=1
+              fi
+            done <<< "$modules"
+            if [ -n "${apache:-}" ]; then
+              printf '\n%s\nThe Apache License 2.0, which a licence above names\n%s\n\n' "$rule" "$rule"
+              cat LICENSES/Apache-2.0.txt
+            fi
+          } > dist/THIRD_PARTY_LICENSES
+          go env GOVERSION
+          echo "$modules"
+      # Go stamps the tag at the checked-out commit as the version.
+      - name: Check the version
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          got="$(build/defy-installer-linux-amd64 --version)"
+          echo "$got"
+          if [ "$got" != "defy-installer version $GITHUB_REF_NAME" ]; then
+            echo "the binary does not report $GITHUB_REF_NAME as its version" >&2
+            exit 1
+          fi
+      # packaging/universal joins the two macOS binaries into a universal
+      # one, which is byte for byte what lipo -create writes; Linux has no
+      # lipo. The arm64 slice keeps the ad-hoc signature that Go's linker
+      # gives it.
+      - name: Universal macOS binary
+        run: |
+          go run ./packaging/universal -o build/defy-installer-darwin-universal \
+            build/defy-installer-darwin-amd64 build/defy-installer-darwin-arm64
+          ls -l build/defy-installer-darwin-universal
+      # packaging/archive packs each archive with Go's archive packages:
+      # the files in the same order every time, with modes 0755 and 0644,
+      # the commit's time and no owner, so the same commit and Go give the
+      # same archives. It replaces zip, tar, gzip, touch and install, whose
+      # options differ between GNU's tools and the Rust coreutils that newer
+      # Ubuntu images ship. unzip and tar then read each archive back.
+      - name: Archives
+        run: |
+          epoch="$(git log -1 --format=%ct)"
+          files=(internal/settings/defy-installer.yaml packaging/README.txt LICENSE dist/THIRD_PARTY_LICENSES)
+          # archive <archive> <binary> <the binary's name in the archive>
+          archive() {
+            go run ./packaging/archive -o "dist/$1" -time "$epoch" -binary "$2" -name "$3" "${files[@]}"
+          }
+          archive defy-installer-macos.zip build/defy-installer-darwin-universal defy-installer
+          archive defy-installer-windows.zip build/defy-installer-windows-amd64.exe defy-installer.exe
+          archive defy-installer-windows-arm64.zip build/defy-installer-windows-arm64.exe defy-installer.exe
+          archive defy-installer-linux-x64.tar.gz build/defy-installer-linux-amd64 defy-installer
+          archive defy-installer-linux-arm64.tar.gz build/defy-installer-linux-arm64 defy-installer
+          for zip in dist/*.zip; do unzip -Z "$zip"; done
+          for tgz in dist/*.tar.gz; do echo "Archive:  $tgz"; tar --list --verbose --numeric-owner --file="$tgz"; done
+      # The README's one-line installs fetch install.sh or install.ps1 from
+      # the latest release, so both go beside the archives, and into
+      # SHA256SUMS.
+      - name: Install scripts
+        run: cp packaging/install.sh packaging/install.ps1 dist/
+      # The archives, THIRD_PARTY_LICENSES and the install scripts.
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+
+  # One attestation for each archive.
+  attest:
+    name: Attestations
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !github.event.repository.private }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/defy-installer-*
+
+  # The draft waits for the attestations, which a private repository
+  # skips.
+  publish:
+    name: Draft release
+    needs: [build, attest]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' &&
+      (needs.attest.result == 'success' || needs.attest.result == 'skipped') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --generate-notes dist/*
+        env:
+          GH_TOKEN: ${{ github.token }}

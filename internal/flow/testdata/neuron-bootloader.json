@@ -1,0 +1,82 @@
+{
+ "comment": "Ports: Studio /dev/studio and the updater /dev/updater at location 1-1, then the bootloader /dev/boot. The ZMK image is NeuronProgram(0x2000, 3, 0x1000) at 0x1000 and 0x00..0xff three times at 0x5000. Enter from Studio and identify the bootloader; nothing is written.",
+ "argv": [
+  "neuron-bootloader",
+  "--port",
+  "/dev/studio"
+ ],
+ "status": 0,
+ "opens": [
+  {
+   "path": "/dev/studio",
+   "events": [
+    {
+     "dtr": true
+    },
+    {
+     "host_hex": "44550101000000000000000000000000629373eb44550101000000000000000000000000629373eb"
+    },
+    {
+     "dtr": false
+    },
+    {
+     "close": true
+    }
+   ]
+  },
+  {
+   "path": "/dev/updater",
+   "events": [
+    {
+     "dtr": true
+    },
+    {
+     "host_hex": "44550101000000000000000000000000629373eb"
+    },
+    {
+     "device_hex": "445501810000000000000000180000004445465955504431000104010050000000001c001027000072b3796d"
+    },
+    {
+     "dtr": false
+    },
+    {
+     "close": true
+    }
+   ]
+  },
+  {
+   "path": "/dev/studio",
+   "events": [
+    {
+     "dtr": true
+    },
+    {
+     "baud": 1200
+    },
+    {
+     "dtr": false
+    },
+    {
+     "close": true
+    }
+   ]
+  },
+  {
+   "path": "/dev/boot",
+   "events": [
+    {
+     "reset_input": true
+    },
+    {
+     "host": "C00077000,00006F54,080F9450#"
+    },
+    {
+     "device": "ACK\r\n"
+    },
+    {
+     "close": true
+    }
+   ]
+  }
+ ]
+}

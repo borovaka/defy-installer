@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: MIT
+#
+# Keeps the pinned actions and the Go modules current: one pull request a week
+# for each, and only for releases at least a week old.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        patterns: ["*"]

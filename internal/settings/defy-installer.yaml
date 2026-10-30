@@ -1,0 +1,15 @@
+# Settings for defy-installer. "defy-installer update --from" and "--firmware"
+# change the values below; your comments and other lines stay as they are.
+
+# The keymap to install from GitHub: "default" for the default layout, or your
+# own keymap repository, like alice/my-defy. Leave it empty to keep the keymap
+# the keyboard runs now. To stay on one release, add @ and its tag, like
+# default@v0.1.0; delete the @ and the tag to follow the latest again.
+keymap: ''
+
+# Firmware files on this computer, a folder or a zip. When set, they are
+# installed instead of the keymap above. Leave it empty to use the keymap.
+# The installer looks for a path like build/firmware.zip in this file's
+# folder, and reads ~/ as your home folder. Write Windows paths in single
+# quotes, like 'C:\Users\alice\firmware.zip'.
+firmware: ''

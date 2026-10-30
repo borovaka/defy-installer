@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: MIT
+#
+# Actions are pinned to commits, with the release in a comment;
+# .github/dependabot.yml keeps them current. setup-go installs the Go
+# toolchain that go.mod names.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Each Monday, so that govulncheck sees advisories published since the
+  # last push, for Go's standard library as well as the modules.
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request cancels the older run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Formatting
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: Tidy go.mod and go.sum
+        run: go mod tidy -diff
+      # Each OS has its own files, so the checks below run once per OS.
+      - name: Current Go idioms
+        run: |
+          for os in darwin linux windows; do
+            GOOS=$os go fix -diff ./...
+          done
+      - name: Vet and staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
+          for os in darwin linux windows; do
+            GOOS=$os go vet ./...
+            GOOS=$os "$(go env GOPATH)/bin/staticcheck" ./...
+          done
+      - name: Known vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          for os in darwin linux windows; do
+            GOOS=$os "$(go env GOPATH)/bin/govulncheck" ./...
+          done
+
+  # The tests on each OS, for the code each OS has of its own: serial
+  # ports, file modes and renames, symbolic links, unpacking the archives,
+  # and the comparison with lipo on macOS. The race detector makes the
+  # tests several times slower, so it runs on Linux only.
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            go test -race ./...
+          else
+            go test ./...
+          fi
+
+  build:
+    name: Builds
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: packaging/build.sh dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: defy-installer
+          path: dist/
+          if-no-files-found: error
